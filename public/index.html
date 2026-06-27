@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KLYNCoin Mining</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-primary: #0a0a0a;
+      --bg-secondary: #121212;
+      --bg-card: #1a1a1a;
+      --bg-input: #222;
+      --gold: #d4a843;
+      --gold-light: #e8c56a;
+      --gold-dark: #b8862d;
+      --text-primary: #e0e0e0;
+      --text-secondary: #999;
+      --text-muted: #666;
+      --success: #4caf50;
+      --danger: #f44336;
+      --info: #2196f3;
+      --border: #2a2a2a;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+
+    .container { max-width: 480px; margin: 0 auto; padding: 20px; }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      font-size: 20px; font-weight: 800;
+      background: linear-gradient(135deg, var(--gold), var(--gold-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+    .logout-btn {
+      background: none; border: 1px solid var(--border);
+      color: var(--text-secondary); padding: 6px 14px;
+      border-radius: 6px; cursor: pointer; font-size: 13px;
+      transition: all 0.2s;
+    }
+    .logout-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+    /* Auth Forms */
+    .auth-page {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      min-height: 100vh; padding: 20px;
+    }
+    .auth-page .logo { font-size: 32px; margin-bottom: 8px; }
+    .auth-subtitle { color: var(--text-secondary); margin-bottom: 30px; font-size: 14px; }
+
+    .auth-form {
+      width: 100%; max-width: 380px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .auth-form h2 {
+      font-size: 20px; margin-bottom: 20px; text-align: center;
+    }
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+      display: block; font-size: 13px; color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .form-group input, .form-group textarea {
+      width: 100%; padding: 11px 14px;
+      background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text-primary);
+      font-size: 14px; outline: none; transition: border-color 0.2s;
+    }
+    .form-group input:focus, .form-group textarea:focus { border-color: var(--gold); }
+    .form-group textarea { resize: vertical; min-height: 60px; font-family: monospace; }
+
+    .btn {
+      padding: 11px 20px; border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      width: 100%;
+      background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+      color: #fff;
+    }
+    .btn-primary:hover { background: linear-gradient(135deg, var(--gold), var(--gold-light)); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: var(--bg-input); color: var(--text-primary);
+      border: 1px solid var(--border); width: 100%;
+    }
+    .btn-secondary:hover { border-color: var(--gold); }
+
+    .btn-small {
+      background: var(--gold-dark); color: #fff;
+      padding: 8px 16px; border: none; border-radius: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .btn-small:hover { background: var(--gold); }
+
+    .btn-success { background: var(--success); color: #fff; width: 100%; }
+    .btn-success:hover { opacity: 0.9; }
+
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { opacity: 0.9; }
+
+    .btn-copy {
+      background: var(--bg-input); color: var(--gold);
+      border: 1px solid var(--border); padding: 6px 12px;
+      border-radius: 6px; cursor: pointer; font-size: 12px;
+      transition: all 0.2s; white-space: nowrap;
+    }
+    .btn-copy:hover { border-color: var(--gold); background: #2a2a1a; }
+
+    .auth-switch {
+      text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-secondary);
+    }
+    .auth-switch a {
+      color: var(--gold); cursor: pointer; text-decoration: none;
+    }
+    .auth-switch a:hover { text-decoration: underline; }
+
+    /* Dashboard */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* Stats Cards */
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
+    .stat-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px; text-align: center;
+    }
+    .stat-card .label {
+      font-size: 11px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+    }
+    .stat-card .value {
+      font-size: 20px; font-weight: 700; color: var(--gold-light);
+    }
+    .stat-card .value.usdt { color: var(--success); }
+    .stat-card .value.small { font-size: 14px; }
+
+    .stat-card.full { grid-column: 1 / -1; }
+
+    /* Speed bar */
+    .speed-bar-container {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px; margin-bottom: 16px;
+    }
+    .speed-bar-label {
+      display: flex; justify-content: space-between;
+      font-size: 13px; margin-bottom: 8px;
+    }
+    .speed-bar-label span:first-child { color: var(--text-secondary); }
+    .speed-bar-label span:last-child { color: var(--gold); font-weight: 600; }
+    .speed-bar {
+      height: 8px; background: var(--bg-input); border-radius: 4px; overflow: hidden;
+    }
+    .speed-bar-fill {
+      height: 100%; border-radius: 4px;
+      background: linear-gradient(90deg, var(--gold-dark), var(--gold-light));
+      transition: width 0.5s ease;
+    }
+
+    .claim-section {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px; margin-bottom: 16px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .claim-amount { color: var(--text-secondary); font-size: 13px; }
+    .claim-amount strong { color: var(--gold-light); font-size: 15px; }
+
+    /* Navigation */
+    .nav {
+      display: flex; gap: 8px; margin: 20px 0;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 6px;
+    }
+    .nav-btn {
+      flex: 1; padding: 10px; text-align: center;
+      background: none; border: none; border-radius: 8px;
+      color: var(--text-secondary); font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .nav-btn:hover { color: var(--text-primary); }
+    .nav-btn.active {
+      background: var(--gold-dark); color: #fff;
+    }
+
+    /* Deposit / Withdraw Cards */
+    .action-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 20px; margin-bottom: 16px;
+    }
+    .action-card h3 { font-size: 16px; margin-bottom: 16px; }
+
+    /* Deposit address box */
+    .deposit-info-box {
+      background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px; margin-bottom: 16px;
+    }
+    .deposit-info-box .info-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 0; font-size: 13px;
+    }
+    .deposit-info-box .info-row .label { color: var(--text-secondary); }
+    .deposit-info-box .info-row .value {
+      color: var(--gold-light); font-family: monospace; font-size: 12px;
+      word-break: break-all; text-align: right; max-width: 60%;
+    }
+    .deposit-info-box .info-row .value.address {
+      font-size: 11px;
+    }
+    .deposit-info-box .divider {
+      border: none; border-top: 1px solid var(--border); margin: 8px 0;
+    }
+
+    /* Deposit status tracker */
+    .deposit-status-tracker {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px; margin-bottom: 16px;
+      display: none;
+    }
+    .deposit-status-tracker.visible { display: block; }
+    .deposit-status-tracker .status-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 12px;
+    }
+    .deposit-status-tracker .status-header h4 { font-size: 14px; }
+    .deposit-status-tracker .status-indicator {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-radius: 6px; font-size: 13px;
+    }
+    .status-indicator.pending {
+      background: #3d3200; color: var(--gold);
+    }
+    .status-indicator.confirmed {
+      background: #0a2e14; color: var(--success);
+    }
+    .status-indicator.checking {
+      background: #1a1a2e; color: var(--info);
+    }
+    .status-spinner {
+      width: 14px; height: 14px; border: 2px solid transparent;
+      border-top-color: currentColor; border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .deposit-steps {
+      list-style: none; padding: 0; margin: 12px 0;
+    }
+    .deposit-steps li {
+      padding: 6px 0 6px 24px; font-size: 13px; color: var(--text-secondary);
+      position: relative;
+    }
+    .deposit-steps li::before {
+      content: ''; position: absolute; left: 0; top: 10px;
+      width: 10px; height: 10px; border-radius: 50%;
+      border: 2px solid var(--text-muted);
+    }
+    .deposit-steps li.done::before {
+      background: var(--success); border-color: var(--success);
+    }
+    .deposit-steps li.active::before {
+      border-color: var(--gold); animation: pulse 1.5s infinite;
+    }
+
+    /* Network badge */
+    .network-badge {
+      display: inline-block;
+      background: #1a1a2e; color: var(--info);
+      padding: 2px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 600;
+      border: 1px solid rgba(33,150,243,0.3);
+    }
+
+    /* Important notice */
+    .notice {
+      background: #1a1a0a; border: 1px solid #3d3200;
+      border-radius: 8px; padding: 12px; margin-bottom: 16px;
+      font-size: 12px; color: var(--gold);
+      line-height: 1.5;
+    }
+    .notice strong { color: var(--gold-light); }
+
+    /* History */
+    .history-list { list-style: none; }
+    .history-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .history-item:last-child { border-bottom: none; }
+    .history-left { display: flex; flex-direction: column; gap: 2px; }
+    .history-amount { font-weight: 600; }
+    .history-ref { color: var(--text-muted); font-size: 10px; font-family: monospace; }
+    .history-date { color: var(--text-muted); font-size: 11px; }
+    .status-badge {
+      padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+    }
+    .status-pending { background: #3d3200; color: var(--gold); }
+    .status-confirmed, .status-completed { background: #0a2e14; color: var(--success); }
+    .status-failed { background: #2e0a0a; color: var(--danger); }
+
+    .verify-btn {
+      background: var(--gold-dark); color: #fff; border: none;
+      padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
+    }
+    .verify-btn:hover { background: var(--gold); }
+
+    .empty-state {
+      text-align: center; padding: 30px 0; color: var(--text-muted); font-size: 14px;
+    }
+
+    .error-msg {
+      color: var(--danger); font-size: 13px; margin-bottom: 12px;
+      background: #2e0a0a; padding: 10px; border-radius: 6px; display: none;
+    }
+    .success-msg {
+      color: var(--success); font-size: 13px; margin-bottom: 12px;
+      background: #0a2e14; padding: 10px; border-radius: 6px; display: none;
+    }
+
+    /* Toast notifications */
+    .toast {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+      padding: 12px 24px; border-radius: 8px; font-size: 14px;
+      z-index: 9999; display: none; max-width: 90%;
+      animation: fadeIn 0.3s ease;
+    }
+    .toast.error { background: #2e0a0a; border: 1px solid var(--danger); color: var(--danger); }
+    .toast.success { background: #0a2e14; border: 1px solid var(--success); color: var(--success); }
+    .toast.info { background: #1a1a2e; border: 1px solid var(--gold); color: var(--gold); }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+    /* Token price */
+    .token-price {
+      text-align: center; padding: 10px; margin-bottom: 4px;
+      font-size: 13px; color: var(--text-muted);
+    }
+
+    .mining-active-indicator {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--success);
+    }
+    .mining-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--success); animation: pulse-mining 1.5s infinite;
+    }
+    @keyframes pulse-mining { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* Copy feedback */
+    .copy-feedback {
+      font-size: 11px; color: var(--success); margin-left: 8px;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .copy-feedback.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+
+  <!-- Auth Page -->
+  <div id="authPage" class="auth-page">
+    <div class="logo">⛏️ KLYNCoin</div>
+    <div class="auth-subtitle">Mine KLYNCoin & earn USDT rewards</div>
+
+    <div id="loginForm" class="auth-form">
+      <h2>Sign In</h2>
+      <div id="loginError" class="error-msg"></div>
+      <div id="loginSuccess" class="success-msg"></div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="loginEmail" placeholder="your@email.com">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="loginPassword" placeholder="••••••••">
+      </div>
+      <button class="btn btn-primary" onclick="login()" id="loginBtn">Sign In</button>
+      <div class="auth-switch">Don't have an account? <a onclick="showRegister()">Register</a></div>
+    </div>
+
+    <div id="registerForm" class="auth-form" style="display:none">
+      <h2>Create Account</h2>
+      <div id="registerError" class="error-msg"></div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="regEmail" placeholder="your@email.com">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="regPassword" placeholder="••••••••">
+      </div>
+      <div class="form-group">
+        <label>USDT Wallet Address (optional)</label>
+        <input type="text" id="regWallet" placeholder="0x... or TON address">
+      </div>
+      <button class="btn btn-primary" onclick="register()" id="registerBtn">Create Account</button>
+      <div class="auth-switch">Already have an account? <a onclick="showLogin()">Sign In</a></div>
+    </div>
+  </div>
+
+  <!-- App Page -->
+  <div id="appPage" style="display:none">
+    <div class="header">
+      <div class="header-left">
+        <span class="logo">⛏️ KLYNCoin</span>
+        <span class="mining-active-indicator"><span class="mining-dot"></span> Mining</span>
+      </div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+
+    <div class="container">
+      <div class="token-price">1 KLYN = 0.001 USDT</div>
+
+      <!-- Navigation -->
+      <div class="nav">
+        <button class="nav-btn active" onclick="showPage('dashboard')">Dashboard</button>
+        <button class="nav-btn" onclick="showPage('deposit')">Deposit</button>
+        <button class="nav-btn" onclick="showPage('withdraw')">Withdraw</button>
+        <button class="nav-btn" onclick="showPage('history')">History</button>
+      </div>
+
+      <!-- Dashboard Page -->
+      <div id="page-dashboard" class="page active">
+        <div class="speed-bar-container">
+          <div class="speed-bar-label">
+            <span>Mining Speed</span>
+            <span id="miningSpeed">0.0001 KLYN/s</span>
+          </div>
+          <div class="speed-bar">
+            <div class="speed-bar-fill" id="speedBarFill" style="width:5%"></div>
+          </div>
+        </div>
+
+        <div class="claim-section">
+          <div>
+            <div class="claim-amount">Unclaimed KLYN</div>
+            <div class="claim-amount"><strong id="unclaimedKlyn">0.00000000</strong> KLYN</div>
+          </div>
+          <button class="btn-small" onclick="claimMining()" id="claimBtn">Claim</button>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="label">KLYN Balance</div>
+            <div class="value" id="balanceKlyn">0.0000</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">USDT Balance</div>
+            <div class="value usdt" id="balanceUsdt">0.00</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Total Deposited</div>
+            <div class="value usdt small" id="totalDeposited">0.00 USDT</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Total Mined</div>
+            <div class="value small" id="totalMined">0.0000</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deposit Page -->
+      <div id="page-deposit" class="page">
+        <div class="action-card">
+          <h3>💠 Deposit USDT (BEP20)</h3>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">
+            Send USDT on BSC (BEP20) network to the address below.
+            Each USDT deposited boosts your mining speed by
+            <strong>0.00005 KLYN/s</strong>.
+          </p>
+
+          <!-- Notice about minimums -->
+          <div class="notice">
+            ⚠️ <strong>Minimum deposit: 1.00 USDT</strong> — deposits below this won't be credited.<br>
+            💳 Only send USDT on <strong>BSC (BEP20)</strong> network. Other networks will be lost!<br>
+            🔗 Contract: <span style="font-family:monospace;font-size:11px;">0x55d398326f99059fF775485246999027B3197955</span>
+          </div>
+        </div>
+
+        <div class="action-card">
+          <h3>📋 Step 1: Create Deposit Request</h3>
+          <div id="depositError" class="error-msg"></div>
+          <div id="depositSuccess" class="success-msg"></div>
+          <div class="form-group">
+            <label>Amount (USDT) — min 1.00</label>
+            <input type="number" step="0.01" min="1" id="depositAmount" placeholder="1.00">
+          </div>
+          <button class="btn btn-primary" onclick="createDepositRequest()" id="createDepositBtn">
+            Generate Deposit Address
+          </button>
+        </div>
+
+        <!-- Deposit instructions (shown after creating request) -->
+        <div id="depositInstructions" class="action-card" style="display:none">
+          <h3>📤 Step 2: Send USDT</h3>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">
+            Send exactly <strong id="depositSendAmount" style="color:var(--gold-light);">0.00 USDT</strong>
+            to the address below:
+          </p>
+
+          <div class="deposit-info-box">
+            <div class="info-row">
+              <span class="label">Network</span>
+              <span><span class="network-badge">BSC BEP20</span></span>
+            </div>
+            <hr class="divider">
+            <div class="info-row">
+              <span class="label">Deposit Address</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="value address" id="displayDepositAddress">—</span>
+                <button class="btn-copy" onclick="copyToClipboard('displayDepositAddress')">Copy</button>
+              </div>
+            </div>
+            <hr class="divider">
+            <div class="info-row">
+              <span class="label">Reference Code</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="value" id="displayReferenceCode">—</span>
+                <button class="btn-copy" onclick="copyToClipboard('displayReferenceCode')">Copy</button>
+              </div>
+            </div>
+            <hr class="divider">
+            <div class="info-row">
+              <span class="label">Amount</span>
+              <span class="value" id="displayDepositAmount">—</span>
+            </div>
+            <hr class="divider">
+            <div class="info-row">
+              <span class="label">Status</span>
+              <span id="displayDepositStatus" style="color:var(--gold);">⏳ Pending</span>
+            </div>
+          </div>
+
+          <ol class="deposit-steps" style="padding-left:20px;margin-bottom:12px;">
+            <li style="font-size:13px;color:var(--text-secondary);margin-bottom:6px;">
+              Send <strong id="stepAmount" style="color:var(--gold-light);">0.00 USDT</strong> via BEP20 to the address above
+            </li>
+            <li style="font-size:13px;color:var(--text-secondary);margin-bottom:6px;">
+              Use reference code <strong id="stepRef" style="color:var(--gold-light);font-family:monospace;">—</strong> in the memo/note field
+            </li>
+            <li style="font-size:13px;color:var(--text-secondary);">
+              Wait for confirmation — the system checks automatically every ~60s
+            </li>
+          </ol>
+
+          <p style="font-size:12px;color:var(--text-muted);">
+            ⏱ Auto-checking every 10 seconds... <span id="depositCheckCount">0</span> checks performed
+          </p>
+        </div>
+
+        <!-- Deposit status tracker (auto-shown) -->
+        <div id="depositStatusTracker" class="deposit-status-tracker">
+          <div class="status-header">
+            <h4>📡 Deposit Status</h4>
+            <div class="status-indicator pending" id="depositStatusIndicator">
+              <span class="status-spinner"></span>
+              <span>Checking...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Withdraw Page -->
+      <div id="page-withdraw" class="page">
+        <div class="action-card">
+          <h3>🏧 Withdraw KLYN → USDT</h3>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">
+            Convert your KLYN to USDT and withdraw to your wallet.
+          </p>
+
+          <div class="notice">
+            ⚠️ <strong>Minimum withdrawal: 3.00 USDT</strong><br>
+            💱 Rate: 1 KLYN = <strong>0.001 USDT</strong><br>
+            📊 Mining speed boost from deposits is <strong>permanent</strong>
+          </div>
+
+          <div id="withdrawError" class="error-msg"></div>
+          <div id="withdrawSuccess" class="success-msg"></div>
+          <div class="form-group">
+            <label>Amount (USDT) — min 3.00</label>
+            <input type="number" step="0.01" min="3" id="withdrawAmount" placeholder="3.00">
+          </div>
+          <div class="form-group">
+            <label>Your USDT Wallet Address (BEP20)</label>
+            <input type="text" id="withdrawWallet" placeholder="0x... or TON address">
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+            This will use <span id="klynNeeded">0.0000</span> KLYN from your balance
+          </div>
+          <button class="btn btn-primary" onclick="submitWithdraw()">Withdraw</button>
+        </div>
+      </div>
+
+      <!-- History Page -->
+      <div id="page-history" class="page">
+        <div class="action-card">
+          <h3>📜 Deposits</h3>
+          <div id="depositHistoryContainer">
+            <ul id="depositHistory" class="history-list">
+              <li class="empty-state">No deposits yet</li>
+            </ul>
+          </div>
+        </div>
+        <div class="action-card">
+          <h3>📜 Withdrawals</h3>
+          <ul id="withdrawHistory" class="history-list">
+            <li class="empty-state">No withdrawals yet</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '';
+    let token = localStorage.getItem('klyn_token');
+    let refreshInterval = null;
+    let miningUpdateInterval = null;
+    let depositCheckInterval = null;
+    let currentDepositId = null;
+    let depositCheckCount = 0;
+
+    // App config (loaded from backend)
+    let appConfig = {
+      minDeposit: 1.00,
+      minWithdrawal: 3.00,
+      klynToUsdtRate: 0.001,
+      baseSpeed: 0.0001,
+      speedPerUsdt: 0.00005,
+      bscscanMode: false,
+      masterWalletAddress: '0x...',
+      frontendPollMs: 10000
+    };
+
+    // Load config on startup
+    fetch(API + '/api/config').then(r => r.json()).then(c => {
+      if (c) Object.assign(appConfig, c);
+    }).catch(() => {});
+
+    // Auth UI
+    function showRegister() {
+      document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('registerForm').style.display = 'block';
+      clearMessages();
+    }
+    function showLogin() {
+      document.getElementById('loginForm').style.display = 'block';
+      document.getElementById('registerForm').style.display = 'none';
+      clearMessages();
+    }
+    function clearMessages() {
+      document.querySelectorAll('.error-msg, .success-msg').forEach(el => el.style.display = 'none');
+    }
+
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = `toast ${type}`;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 4000);
+    }
+
+    // Clipboard
+    function copyToClipboard(elementId) {
+      const el = document.getElementById(elementId);
+      const text = el.textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('Copied!', 'success');
+      }).catch(() => {
+        // Fallback
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showToast('Copied!', 'success');
+      });
+    }
+
+    // Auth
+    async function login() {
+      const email = document.getElementById('loginEmail').value;
+      const password = document.getElementById('loginPassword').value;
+      const errorEl = document.getElementById('loginError');
+
+      if (!email || !password) {
+        errorEl.textContent = 'Please fill in all fields';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      try {
+        const res = await fetch(API + '/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        token = data.token;
+        localStorage.setItem('klyn_token', token);
+        enterApp();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+      }
+    }
+
+    async function register() {
+      const email = document.getElementById('regEmail').value;
+      const password = document.getElementById('regPassword').value;
+      const walletAddress = document.getElementById('regWallet').value;
+      const errorEl = document.getElementById('registerError');
+
+      if (!email || !password) {
+        errorEl.textContent = 'Please fill in all fields';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      document.getElementById('registerBtn').disabled = true;
+      document.getElementById('registerBtn').textContent = 'Creating...';
+
+      try {
+        const res = await fetch(API + '/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, walletAddress })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        token = data.token;
+        localStorage.setItem('klyn_token', token);
+        enterApp();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+        document.getElementById('registerBtn').disabled = false;
+        document.getElementById('registerBtn').textContent = 'Create Account';
+      }
+    }
+
+    function logout() {
+      clearInterval(refreshInterval);
+      clearInterval(miningUpdateInterval);
+      stopDepositChecking();
+      token = null;
+      localStorage.removeItem('klyn_token');
+      document.getElementById('appPage').style.display = 'none';
+      document.getElementById('authPage').style.display = 'flex';
+      showLogin();
+    }
+
+    // Enter app
+    function enterApp() {
+      document.getElementById('authPage').style.display = 'none';
+      document.getElementById('appPage').style.display = 'block';
+      showPage('dashboard');
+      refreshDashboard();
+      refreshInterval = setInterval(refreshDashboard, 3000);
+      if (miningUpdateInterval) clearInterval(miningUpdateInterval);
+      miningUpdateInterval = setInterval(updateMiningVisual, 1000);
+
+      // Reload config
+      fetch(API + '/api/config').then(r => r.json()).then(c => {
+        if (c) Object.assign(appConfig, c);
+      }).catch(() => {});
+    }
+
+    // Page navigation
+    function showPage(name) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('page-' + name).classList.add('active');
+      const btns = document.querySelectorAll('.nav-btn');
+      const idx = ['dashboard', 'deposit', 'withdraw', 'history'].indexOf(name);
+      if (btns[idx]) btns[idx].classList.add('active');
+
+      if (name === 'history') loadHistory();
+      if (name === 'dashboard') stopDepositChecking();
+    }
+
+    // Mining visual tick
+    let lastUnclaimedUpdate = 0;
+    let localSpeed = 0;
+
+    function updateMiningVisual() {
+      if (!lastUnclaimedUpdate) return;
+      const now = Date.now();
+      const elapsed = (now - lastUnclaimedUpdate) / 1000;
+      if (elapsed < 0.5) return;
+
+      const unclaimedEl = document.getElementById('unclaimedKlyn');
+      const current = parseFloat(unclaimedEl.textContent) || 0;
+      const increment = localSpeed * elapsed;
+      if (increment > 0) {
+        unclaimedEl.textContent = (current + increment).toFixed(8);
+      }
+      lastUnclaimedUpdate = now;
+    }
+
+    // Dashboard
+    async function refreshDashboard() {
+      if (!token) return;
+
+      try {
+        const res = await fetch(API + '/api/mining/status', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (!res.ok) { if (res.status === 401) logout(); return; }
+        const data = await res.json();
+
+        document.getElementById('balanceKlyn').textContent = data.balanceKlyn.toFixed(4);
+        document.getElementById('balanceUsdt').textContent = data.balanceUsdt.toFixed(2);
+        document.getElementById('unclaimedKlyn').textContent = data.minedUnclaimed.toFixed(8);
+        document.getElementById('miningSpeed').textContent = data.miningSpeed.toFixed(6) + ' KLYN/s';
+        document.getElementById('totalDeposited').textContent = data.totalDeposited.toFixed(2) + ' USDT';
+
+        const totalMinedEl = document.getElementById('totalMined');
+        const totalMined = data.balanceKlyn + data.minedUnclaimed;
+        totalMinedEl.textContent = totalMined.toFixed(4);
+
+        const speedPercent = Math.min(100, (data.miningSpeed / 0.001) * 100);
+        document.getElementById('speedBarFill').style.width = speedPercent + '%';
+
+        document.getElementById('claimBtn').disabled = data.minedUnclaimed <= 0;
+
+        localSpeed = data.miningSpeed;
+        lastUnclaimedUpdate = Date.now();
+      } catch (err) {
+        console.error('Refresh error:', err);
+      }
+    }
+
+    async function claimMining() {
+      try {
+        const res = await fetch(API + '/api/mining/claim', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        showToast('Claimed ' + data.amount.toFixed(8) + ' KLYN!', 'success');
+        refreshDashboard();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // =============== DEPOSIT SYSTEM ===============
+
+    // Step 1: Create a deposit request
+    async function createDepositRequest() {
+      const amount = parseFloat(document.getElementById('depositAmount').value);
+      const errorEl = document.getElementById('depositError');
+      const successEl = document.getElementById('depositSuccess');
+      const btn = document.getElementById('createDepositBtn');
+      errorEl.style.display = 'none';
+      successEl.style.display = 'none';
+
+      if (!amount || amount < appConfig.minDeposit) {
+        errorEl.textContent = 'Minimum deposit is ' + appConfig.minDeposit.toFixed(2) + ' USDT';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      try {
+        const res = await fetch(API + '/api/deposit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ amount })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        // Show success
+        successEl.textContent = '✅ Deposit request created! Follow the instructions below to send USDT.';
+        successEl.style.display = 'block';
+
+        // Populate deposit instructions
+        document.getElementById('displayDepositAddress').textContent = data.depositAddress;
+        document.getElementById('displayReferenceCode').textContent = data.referenceCode;
+        document.getElementById('displayDepositAmount').textContent = data.amount.toFixed(2) + ' USDT';
+        document.getElementById('displayDepositStatus').textContent = '⏳ Pending';
+        document.getElementById('depositSendAmount').textContent = data.amount.toFixed(2);
+        document.getElementById('stepAmount').textContent = data.amount.toFixed(2) + ' USDT';
+        document.getElementById('stepRef').textContent = data.referenceCode;
+
+        currentDepositId = data.depositId;
+        depositCheckCount = 0;
+        document.getElementById('depositCheckCount').textContent = '0';
+
+        // Show instructions
+        document.getElementById('depositInstructions').style.display = 'block';
+        document.getElementById('depositStatusTracker').classList.add('visible');
+        document.getElementById('depositStatusIndicator').className = 'status-indicator checking';
+        document.getElementById('depositStatusIndicator').innerHTML =
+          '<span class="status-spinner"></span><span>Waiting for deposit...</span>';
+
+        // Start auto-checking
+        startDepositChecking();
+
+        btn.disabled = false;
+        btn.textContent = 'Generate Deposit Address';
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Generate Deposit Address';
+      }
+    }
+
+    // Auto-check deposit status
+    function startDepositChecking() {
+      stopDepositChecking();
+      depositCheckInterval = setInterval(checkDepositStatus, appConfig.frontendPollMs || 10000);
+      // Also check immediately
+      checkDepositStatus();
+    }
+
+    function stopDepositChecking() {
+      if (depositCheckInterval) {
+        clearInterval(depositCheckInterval);
+        depositCheckInterval = null;
+      }
+    }
+
+    async function checkDepositStatus() {
+      if (!token || !currentDepositId) return;
+
+      try {
+        const res = await fetch(API + '/api/deposit/check', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.hasDeposit && data.deposit) {
+          const dep = data.deposit;
+          depositCheckCount++;
+          document.getElementById('depositCheckCount').textContent = depositCheckCount;
+
+          const indicator = document.getElementById('depositStatusIndicator');
+          const statusText = document.getElementById('displayDepositStatus');
+
+          if (dep.status === 'confirmed') {
+            // Deposit confirmed!
+            indicator.className = 'status-indicator confirmed';
+            indicator.innerHTML = '✅ <span>Confirmed! 🚀 Mining speed boosted!</span>';
+            statusText.textContent = '✅ Confirmed';
+            statusText.style.color = 'var(--success)';
+
+            showToast('💎 Deposit of ' + dep.amount.toFixed(2) + ' USDT confirmed! Mining speed increased!', 'success');
+
+            // Stop checking
+            stopDepositChecking();
+            currentDepositId = null;
+
+            // Refresh dashboard
+            refreshDashboard();
+
+            // Also refresh deposit history in background
+            if (data.allDeposits && data.allDeposits.length) {
+              updateDepositHistoryInline(data.allDeposits);
+            }
+          } else {
+            // Still pending
+            indicator.className = 'status-indicator checking';
+            if (depositCheckCount > 3) {
+              // After a few checks, show more informative message
+              indicator.innerHTML =
+                '<span class="status-spinner"></span><span>Waiting for transaction... <span style="font-size:11px;opacity:0.7;">(checks: ' + depositCheckCount + ')</span></span>';
+            } else {
+              indicator.innerHTML =
+                '<span class="status-spinner"></span><span>Awaiting confirmation...</span>';
+            }
+            document.getElementById('displayDepositStatus').textContent = '⏳ Pending (' + depositCheckCount + ' checks)';
+          }
+        }
+      } catch (err) {
+        console.error('Deposit check error:', err);
+      }
+    }
+
+    function updateDepositHistoryInline(deposits) {
+      // Updates the deposit history list in the background
+      const el = document.getElementById('depositHistory');
+      if (!deposits.length) return;
+
+      el.innerHTML = deposits.map(d => `
+        <li class="history-item">
+          <div class="history-left">
+            <span class="history-amount">+${d.amount.toFixed(2)} USDT</span>
+            ${d.reference_code ? `<span class="history-ref">Ref: ${d.reference_code}</span>` : ''}
+            <span class="history-date">${new Date(d.created_at + 'Z').toLocaleString()}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="status-badge status-${d.status}">${d.status}</span>
+            ${d.status === 'pending' ? `<button class="verify-btn" onclick="verifyDeposit(${d.id})">Verify</button>` : ''}
+          </div>
+        </li>
+      `).join('');
+    }
+
+    // =============== WITHDRAW ===============
+
+    async function submitWithdraw() {
+      const amount = parseFloat(document.getElementById('withdrawAmount').value);
+      const walletAddress = document.getElementById('withdrawWallet').value;
+      const errorEl = document.getElementById('withdrawError');
+      const successEl = document.getElementById('withdrawSuccess');
+      errorEl.style.display = 'none';
+      successEl.style.display = 'none';
+
+      if (!amount || amount < appConfig.minWithdrawal) {
+        errorEl.textContent = 'Minimum withdrawal is ' + appConfig.minWithdrawal.toFixed(2) + ' USDT';
+        errorEl.style.display = 'block';
+        return;
+      }
+      if (!walletAddress) {
+        errorEl.textContent = 'Wallet address is required';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      try {
+        const res = await fetch(API + '/api/withdraw', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ amount, walletAddress })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        successEl.textContent = data.message;
+        successEl.style.display = 'block';
+        document.getElementById('withdrawAmount').value = '';
+        document.getElementById('withdrawWallet').value = '';
+        refreshDashboard();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+      }
+    }
+
+    // Withdraw amount helper
+    document.addEventListener('input', function(e) {
+      if (e.target.id === 'withdrawAmount') {
+        const amt = parseFloat(e.target.value) || 0;
+        const klynNeeded = amt / (appConfig.klynToUsdtRate || 0.001);
+        document.getElementById('klynNeeded').textContent = klynNeeded.toFixed(4);
+      }
+    });
+
+    // =============== HISTORY ===============
+
+    async function loadHistory() {
+      try {
+        const dRes = await fetch(API + '/api/deposits', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const deposits = await dRes.json();
+        renderDeposits(deposits);
+
+        const wRes = await fetch(API + '/api/withdrawals', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const withdrawals = await wRes.json();
+        renderWithdrawals(withdrawals);
+      } catch (err) {
+        console.error('History error:', err);
+      }
+    }
+
+    function renderDeposits(deposits) {
+      const el = document.getElementById('depositHistory');
+      if (!deposits.length) {
+        el.innerHTML = '<li class="empty-state">No deposits yet</li>';
+        return;
+      }
+      el.innerHTML = deposits.map(d => `
+        <li class="history-item">
+          <div class="history-left">
+            <span class="history-amount">+${d.amount.toFixed(2)} USDT</span>
+            ${d.reference_code ? `<span class="history-ref">Ref: ${d.reference_code}</span>` : ''}
+            <span class="history-date">${new Date(d.created_at + 'Z').toLocaleString()}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="status-badge status-${d.status}">${d.status}</span>
+            ${d.status === 'pending' ? `<button class="verify-btn" onclick="verifyDeposit(${d.id})">Verify</button>` : ''}
+          </div>
+        </li>
+      `).join('');
+    }
+
+    function renderWithdrawals(withdrawals) {
+      const el = document.getElementById('withdrawHistory');
+      if (!withdrawals.length) {
+        el.innerHTML = '<li class="empty-state">No withdrawals yet</li>';
+        return;
+      }
+      el.innerHTML = withdrawals.map(w => `
+        <li class="history-item">
+          <div class="history-left">
+            <span class="history-amount">-${w.amount_usdt.toFixed(2)} USDT (${w.amount_klyn.toFixed(4)} KLYN)</span>
+            <span class="history-date">To: ${w.wallet_address.substring(0,10)}...${w.wallet_address.substring(w.wallet_address.length-4)}</span>
+          </div>
+          <span class="status-badge status-${w.status === 'completed' ? 'completed' : 'pending'}">${w.status}</span>
+        </li>
+      `).join('');
+    }
+
+    // Verify deposit (admin/manual)
+    async function verifyDeposit(depositId) {
+      try {
+        const res = await fetch(API + '/api/deposit/verify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ depositId })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        showToast(data.message, 'success');
+        loadHistory();
+        refreshDashboard();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // =============== INIT ===============
+
+    // Auto-login check
+    if (token) {
+      fetch(API + '/api/user', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      }).then(res => {
+        if (res.ok) enterApp();
+        else { localStorage.removeItem('klyn_token'); token = null; }
+      }).catch(() => {});
+    }
+
+    // Enter key support
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        if (document.getElementById('authPage').style.display !== 'none') {
+          if (document.getElementById('loginForm').style.display !== 'none') login();
+          else register();
+        }
+      }
+    });
+  </script>
+</body>
+</html>
