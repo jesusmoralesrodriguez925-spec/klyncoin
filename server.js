@@ -11,7 +11,7 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3456;
 const JWT_SECRET = process.env.JWT_SECRET || 'klyncoin-secret-key-2024';
-const DB_PATH = path.join(__dirname, 'database.sqlite');
+const DB_PATH = path.join('/tmp', 'database.sqlite');
 
 // --- Environment Configuration ---
 const BSCSCAN_API_KEY = process.env.BSCSCAN_API_KEY || '';
@@ -100,9 +100,13 @@ async function initDB() {
 
 function saveDB() {
   if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(DB_PATH, buffer);
+    try {
+      const data = db.export();
+      const buffer = Buffer.from(data);
+      fs.writeFileSync(DB_PATH, buffer);
+    } catch (err) {
+      console.error('saveDB error:', err);
+    }
   }
 }
 
