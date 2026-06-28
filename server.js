@@ -2,16 +2,15 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const initSqlJs = require('sql.js');
-const fs = require('fs');
+const { Pool } = require('pg');
+const crypto = require('crypto');
 const path = require('path');
 const { ethers } = require('ethers');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3456;
-const JWT_SECRET = process.env.JWT_SECRET || 'klyncoin-secret-key-2024';
-const DB_PATH = path.join('/tmp', 'database.sqlite');
+const JWT_SECRET = process.env.JWT_SECRET || 'klyncoin-secret-2024-seguro';
 
 // --- Environment Configuration ---
 const BSCSCAN_API_KEY = process.env.BSCSCAN_API_KEY || '';
@@ -21,92 +20,36 @@ const BSCSCAN_API = 'https://api.bscscan.com/api';
 const CHECK_INTERVAL_MS = parseInt(process.env.CHECK_INTERVAL || '60000', 10);
 const FRONTEND_POLL_MS = parseInt(process.env.FRONTEND_POLL || '10000', 10);
 
-// --- Middleware ---
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-
-// --- Database Setup ---
-let db;
-const SALT_ROUNDS = 10;
-
 // Mining constants
 const BASE_SPEED = 0.0001; // KLYN/sec
 const SPEED_PER_USDT = 0.00005; // KLYN/sec per USDT
 const KLYN_TO_USDT_RATE = 0.001; // 1 KLYN = 0.001 USDT
 
-async function initDB() {
-  const SQL = await initSqlJs();
+// --- Supabase PostgreSQL Connection ---
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-  if (fs.existsSync(DB_PATH)) {
-    const buffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
+// --- Middleware ---
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// --- Auth Middleware ---
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No token provided' });
   }
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      wallet_address TEXT DEFAULT '',
-      balance_usdt REAL DEFAULT 0,
-      balance_klyn REAL DEFAULT 0,
-      mining_speed REAL DEFAULT 0.0001,
-      mined_unclaimed REAL DEFAULT 0,
-      total_deposited REAL DEFAULT 0,
-      last_mine_at TEXT DEFAULT (datetime('now')),
-      created_at TEXT DEFAULT (datetime('now'))
-    )
-  `);
-
-  // Enhanced deposits table with reference_code and deposit_address
-  db.run(`
-    CREATE TABLE IF NOT EXISTS deposits (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      amount REAL NOT NULL,
-      txid TEXT DEFAULT '',
-      status TEXT DEFAULT 'pending',
-      reference_code TEXT DEFAULT '',
-      deposit_address TEXT DEFAULT '',
-      checked_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-  `);
-
-  // Migrate old deposits table: add columns if they don't exist
-  try { db.run(`ALTER TABLE deposits ADD COLUMN reference_code TEXT DEFAULT ''`); } catch(e) {}
-  try { db.run(`ALTER TABLE deposits ADD COLUMN deposit_address TEXT DEFAULT ''`); } catch(e) {}
-  try { db.run(`ALTER TABLE deposits ADD COLUMN checked_count INTEGER DEFAULT 0`); } catch(e) {}
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS withdrawals (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      amount_klyn REAL NOT NULL,
-      amount_usdt REAL NOT NULL,
-      wallet_address TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-  `);
-
-  saveDB();
-}
-
-function saveDB() {
-  if (db) {
-    try {
-      const data = db.export();
-      const buffer = Buffer.from(data);
-      fs.writeFileSync(DB_PATH, buffer);
-    } catch (err) {
-      console.error('saveDB error:', err);
-    }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.userId || decoded.id;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid token' });
   }
 }
 
@@ -117,7 +60,152 @@ function generateReferenceCode(userId) {
   return `KLYN-${userId}-${timestamp}-${random}`;
 }
 
-// --- BSCScan API Polling ---
+// ────────────────────────────────────────────────────────────────────────────
+// DATABASE INITIALIZATION
+// ────────────────────────────────────────────────────────────────────────────
+
+async function initDB() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        wallet_address TEXT DEFAULT '',
+        balance_usdt REAL DEFAULT 0,
+        balance_klyn REAL DEFAULT 0,
+        mining_speed REAL DEFAULT 0.0001,
+        mined_unclaimed REAL DEFAULT 0,
+        total_deposited REAL DEFAULT 0,
+        last_mine_at TIMESTAMP DEFAULT NOW(),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ users table ready');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS deposits (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        amount REAL NOT NULL,
+        txid TEXT DEFAULT '',
+        status TEXT DEFAULT 'pending',
+        reference_code TEXT DEFAULT '',
+        deposit_address TEXT DEFAULT '',
+        checked_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ deposits table ready');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS withdrawals (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        amount_klyn REAL NOT NULL,
+        amount_usdt REAL NOT NULL,
+        wallet_address TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ withdrawals table ready');
+
+    // Create test user if not exists
+    const existing = await client.query(
+      "SELECT id FROM users WHERE email = 'test@klyncoin.com'"
+    );
+
+    if (existing.rows.length === 0) {
+      const hash = await bcrypt.hash('password123', 10);
+      await client.query(
+        `INSERT INTO users (email, password, wallet_address, balance_usdt, balance_klyn, mining_speed, mined_unclaimed, total_deposited)
+         VALUES ('test@klyncoin.com', $1, '0xTestWallet', 10, 100, 0.0006, 5, 10)`,
+        [hash]
+      );
+      console.log('✅ Test user created: test@klyncoin.com / password123');
+    } else {
+      console.log('ℹ️  Test user already exists, skipping');
+    }
+
+    console.log('✅ Database tables initialized successfully\n');
+  } finally {
+    client.release();
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MINING LOGIC
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Calculate mining earnings since last mine and update the user's record.
+ * Returns the updated user data with camelCase fields (matching original API).
+ */
+async function calculateAndGetUser(userId) {
+  const client = await pool.connect();
+  try {
+    // Fetch current user state
+    const userRes = await client.query('SELECT * FROM users WHERE id = $1', [userId]);
+    if (!userRes.rows.length) return null;
+
+    const user = userRes.rows[0];
+
+    const lastMine = user.last_mine_at ? new Date(user.last_mine_at) : new Date();
+    const now = new Date();
+    const elapsedSec = Math.max(0, (now - lastMine) / 1000);
+
+    const mined = elapsedSec * user.mining_speed;
+
+    // Update mined_unclaimed and last_mine_at
+    await client.query(
+      `UPDATE users SET mined_unclaimed = mined_unclaimed + $1, last_mine_at = NOW() WHERE id = $2`,
+      [mined, userId]
+    );
+
+    // Re-fetch updated values
+    const updatedRes = await client.query('SELECT * FROM users WHERE id = $1', [userId]);
+    const u = updatedRes.rows[0];
+
+    // Count pending deposits
+    const pendingRes = await client.query(
+      "SELECT COUNT(*)::int AS cnt FROM deposits WHERE user_id = $1 AND status = 'pending'",
+      [userId]
+    );
+    const pendingDeposits = pendingRes.rows[0].cnt;
+
+    return {
+      id: u.id,
+      email: u.email,
+      walletAddress: u.wallet_address,
+      balanceUsdt: u.balance_usdt,
+      balanceKlyn: u.balance_klyn,
+      miningSpeed: u.mining_speed,
+      minedUnclaimed: u.mined_unclaimed,
+      totalDeposited: u.total_deposited,
+      lastMineAt: u.last_mine_at,
+      pendingDeposits,
+      createdAt: u.created_at
+    };
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Simple mining calculation that updates and returns just the mining-related fields.
+ * Used by /api/mining/status and /api/mining/claim.
+ */
+async function calculateMining(userId) {
+  const user = await calculateAndGetUser(userId);
+  return user;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// BSCSCAN DEPOSIT CHECKING
+// ────────────────────────────────────────────────────────────────────────────
+
 let lastCheckedTx = '';
 let bscscanPollCount = 0;
 
@@ -148,7 +236,6 @@ async function checkBSCScanDeposits() {
     const txs = data.result || [];
     if (!txs.length) return [];
 
-    // Track the latest tx hash to avoid re-checking
     if (!lastCheckedTx && txs.length > 0) {
       lastCheckedTx = txs[0].hash;
     }
@@ -165,91 +252,37 @@ async function checkBSCScanDeposits() {
   }
 }
 
-// --- Background Deposit Checker ---
-async function processPendingDeposits() {
-  const result = db.exec(
-    `SELECT d.id, d.user_id, d.amount, d.reference_code, d.created_at,
-            u.email, u.mining_speed
-     FROM deposits d
-     JOIN users u ON d.user_id = u.id
-     WHERE d.status = 'pending'
-     ORDER BY d.created_at ASC`
-  );
-
-  if (!result.length || !result[0].values.length) return;
-
-  const cols = result[0].columns;
-  const pendingDeposits = result[0].values.map(row => {
-    const obj = {};
-    cols.forEach((c, i) => obj[c] = row[i]);
-    return obj;
-  });
-
-  console.log(`Deposit checker: ${pendingDeposits.length} pending deposits found`);
-
-  // Try BSCScan matching first (Mode A)
-  const bscTxs = await checkBSCScanDeposits();
-
-  if (bscTxs.length > 0) {
-    for (const deposit of pendingDeposits) {
-      const matched = await findMatchingBSCTransaction(deposit, bscTxs);
-      if (matched) {
-        console.log(`Auto-verifying deposit #${deposit.id} for ${deposit.email}: ${deposit.amount} USDT (tx: ${matched.hash})`);
-        await verifyDepositById(deposit.id, matched.hash);
-      }
-    }
-  } else if (!BSCSCAN_API_KEY || MASTER_WALLET_ADDRESS === '0x'.padEnd(42, '0')) {
-    // Mode B: No BSCScan configured — check for pending deposits that can be auto-verified
-    // via other mechanisms (e.g., mark deposits that match the reference code pattern)
-    if (bscscanPollCount % 5 === 0 && bscscanPollCount > 0) {
-      console.log('Deposit checker: BSCScan not configured. Waiting for manual verification or reference-based deposits.');
-    }
-  }
-
-  // Increment checked_count for all pending deposits
-  for (const deposit of pendingDeposits) {
-    db.run(`UPDATE deposits SET checked_count = checked_count + 1 WHERE id = ?`, {
-      bind: [deposit.id]
-    });
-  }
-  saveDB();
-}
-
 async function findMatchingBSCTransaction(deposit, bscTxs) {
-  const amountTolerance = 0.5; // Allow 0.5 USDT tolerance for fees
-  const depositTime = new Date(deposit.created_at + 'Z').getTime();
+  const amountTolerance = 0.5;
+  const depositTime = new Date(deposit.created_at).getTime();
 
   for (const tx of bscTxs) {
-    // Check: is this a transfer TO our master wallet?
     if (tx.to.toLowerCase() !== MASTER_WALLET_ADDRESS) continue;
 
-    // Check: does the amount match?
     const txAmount = parseFloat(tx.value) / 1e18;
     if (Math.abs(txAmount - deposit.amount) > amountTolerance) continue;
 
-    // Check: was this transaction after the deposit request?
     const txTime = parseInt(tx.timeStamp, 10) * 1000;
-    if (txTime < depositTime - 300000) continue; // Within 5 min before (time sync tolerance)
+    if (txTime < depositTime - 300000) continue;
 
-    // Check: reference in input data (if the user included a memo)
     if (deposit.reference_code && tx.input && tx.input !== '0x') {
       try {
         const inputHex = tx.input.toLowerCase();
         const refHex = Buffer.from(deposit.reference_code).toString('hex').toLowerCase();
-        // Some wallets embed reference in the input data
         if (inputHex.includes(refHex)) {
           return tx;
         }
-      } catch(e) {}
+      } catch (e) {
+        // ignore
+      }
     }
 
-    // If no reference match, just match by amount (if this deposit is the only one with this amount)
-    const sameAmount = db.exec(
-      `SELECT COUNT(*) as cnt FROM deposits
-       WHERE amount = ? AND status = 'pending' AND id != ?`,
-      { bind: [deposit.amount, deposit.id] }
+    // If no reference match, check if this amount is unique among pending deposits
+    const sameAmountRes = await pool.query(
+      "SELECT COUNT(*)::int AS cnt FROM deposits WHERE amount = $1 AND status = 'pending' AND id != $2",
+      [deposit.amount, deposit.id]
     );
-    const count = sameAmount.length ? sameAmount[0].values[0][0] : 0;
+    const count = sameAmountRes.rows[0].cnt;
     if (count === 0) {
       return tx;
     }
@@ -260,113 +293,79 @@ async function findMatchingBSCTransaction(deposit, bscTxs) {
 
 async function verifyDepositById(depositId, txid) {
   // Get the deposit
-  const depResult = db.exec(`SELECT * FROM deposits WHERE id = ?`, { bind: [depositId] });
-  if (!depResult.length || !depResult[0].values.length) return;
+  const depRes = await pool.query('SELECT * FROM deposits WHERE id = $1', [depositId]);
+  if (!depRes.rows.length) return;
 
-  const depCols = depResult[0].columns;
-  const depVals = depResult[0].values[0];
-  const deposit = {};
-  depCols.forEach((c, i) => deposit[c] = depVals[i]);
-
+  const deposit = depRes.rows[0];
   if (deposit.status !== 'pending') return;
 
   const newSpeed = deposit.amount * SPEED_PER_USDT;
 
   // Update deposit
-  db.run(`UPDATE deposits SET status = 'confirmed', txid = ? WHERE id = ?`, {
-    bind: [txid || 'auto-verified', depositId]
-  });
+  await pool.query(
+    "UPDATE deposits SET status = 'confirmed', txid = $1 WHERE id = $2",
+    [txid || 'auto-verified', depositId]
+  );
 
   // Boost user
-  db.run(`
-    UPDATE users SET
-      balance_usdt = balance_usdt + ?,
-      total_deposited = total_deposited + ?,
-      mining_speed = mining_speed + ?
-    WHERE id = ?
-  `, {
-    bind: [deposit.amount, deposit.amount, newSpeed, deposit.user_id]
-  });
-  saveDB();
+  await pool.query(
+    `UPDATE users SET
+      balance_usdt = balance_usdt + $1,
+      total_deposited = total_deposited + $1,
+      mining_speed = mining_speed + $2
+     WHERE id = $3`,
+    [deposit.amount, newSpeed, deposit.user_id]
+  );
 
   console.log(`✅ Deposit #${depositId} verified: +${deposit.amount} USDT, +${newSpeed} KLYN/s mining speed`);
 }
 
-// --- Auth Middleware ---
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
-  }
-
-  const token = authHeader.split(' ')[1];
+async function processPendingDeposits() {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
+    const pendingRes = await pool.query(
+      `SELECT d.id, d.user_id, d.amount, d.reference_code, d.created_at,
+              u.email, u.mining_speed
+       FROM deposits d
+       JOIN users u ON d.user_id = u.id
+       WHERE d.status = 'pending'
+       ORDER BY d.created_at ASC`
+    );
+
+    if (!pendingRes.rows.length) return;
+
+    const pendingDeposits = pendingRes.rows;
+    console.log(`Deposit checker: ${pendingDeposits.length} pending deposits found`);
+
+    // Try BSCScan matching first (Mode A)
+    const bscTxs = await checkBSCScanDeposits();
+
+    if (bscTxs.length > 0) {
+      for (const deposit of pendingDeposits) {
+        const matched = await findMatchingBSCTransaction(deposit, bscTxs);
+        if (matched) {
+          console.log(`Auto-verifying deposit #${deposit.id} for ${deposit.email}: ${deposit.amount} USDT (tx: ${matched.hash})`);
+          await verifyDepositById(deposit.id, matched.hash);
+        }
+      }
+    } else if (!BSCSCAN_API_KEY || MASTER_WALLET_ADDRESS === '0x'.padEnd(42, '0')) {
+      if (bscscanPollCount % 5 === 0 && bscscanPollCount > 0) {
+        console.log('Deposit checker: BSCScan not configured. Waiting for manual verification.');
+      }
+    }
+
+    // Increment checked_count for all pending deposits
+    await pool.query(
+      "UPDATE deposits SET checked_count = checked_count + 1 WHERE status = 'pending'"
+    );
+
   } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
+    console.error('processPendingDeposits error:', err);
   }
 }
 
-// --- Mining Logic ---
-function calculateMining(userId) {
-  const user = db.exec(`SELECT * FROM users WHERE id = ?`, { bind: [userId] });
-  if (!user.length || !user[0].values.length) return null;
-
-  const cols = user[0].columns;
-  const vals = user[0].values[0];
-  const u = {};
-  cols.forEach((c, i) => u[c] = vals[i]);
-
-  const lastMine = new Date(u.last_mine_at + 'Z');
-  const now = new Date();
-  const elapsedSec = Math.max(0, (now - lastMine) / 1000);
-
-  const mined = elapsedSec * u.mining_speed;
-
-  db.run(`UPDATE users SET mined_unclaimed = mined_unclaimed + ?, last_mine_at = datetime('now') WHERE id = ?`, {
-    bind: [mined, userId]
-  });
-  saveDB();
-
-  return {
-    minedThisPeriod: mined,
-    newUnclaimed: u.mined_unclaimed + mined,
-    miningSpeed: u.mining_speed
-  };
-}
-
-function getUserData(userId) {
-  calculateMining(userId);
-  const result = db.exec(`SELECT * FROM users WHERE id = ?`, { bind: [userId] });
-  if (!result.length || !result[0].values.length) return null;
-
-  const cols = result[0].columns;
-  const vals = result[0].values[0];
-  const u = {};
-  cols.forEach((c, i) => u[c] = vals[i]);
-
-  // Count pending deposits
-  const pendingCount = db.exec(`SELECT COUNT(*) as cnt FROM deposits WHERE user_id = ? AND status = 'pending'`, { bind: [userId] });
-  const pendingDeposits = pendingCount.length ? pendingCount[0].values[0][0] : 0;
-
-  return {
-    id: u.id,
-    email: u.email,
-    walletAddress: u.wallet_address,
-    balanceUsdt: u.balance_usdt,
-    balanceKlyn: u.balance_klyn,
-    miningSpeed: u.mining_speed,
-    minedUnclaimed: u.mined_unclaimed,
-    totalDeposited: u.total_deposited,
-    lastMineAt: u.last_mine_at,
-    pendingDeposits,
-    createdAt: u.created_at
-  };
-}
-
-// --- API Routes ---
+// ────────────────────────────────────────────────────────────────────────────
+// API ROUTES
+// ────────────────────────────────────────────────────────────────────────────
 
 // POST /api/register
 app.post('/api/register', async (req, res) => {
@@ -378,20 +377,18 @@ app.post('/api/register', async (req, res) => {
     }
 
     // Check if user exists
-    const existing = db.exec(`SELECT id FROM users WHERE email = ?`, { bind: [email] });
-    if (existing.length && existing[0].values.length) {
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existing.rows.length) {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-    db.run(`INSERT INTO users (email, password, wallet_address, mining_speed) VALUES (?, ?, ?, ?)`, {
-      bind: [email, hashedPassword, walletAddress || '', BASE_SPEED]
-    });
-    saveDB();
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      `INSERT INTO users (email, password, wallet_address, mining_speed) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [email, hashedPassword, walletAddress || '', BASE_SPEED]
+    );
 
-    const userId = db.exec(`SELECT last_insert_rowid() as id`);
-    const id = userId[0].values[0][0];
-
+    const id = result.rows[0].id;
     const token = jwt.sign({ userId: id }, JWT_SECRET, { expiresIn: '7d' });
 
     res.json({ token, user: { id, email } });
@@ -410,16 +407,12 @@ app.post('/api/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const result = db.exec(`SELECT * FROM users WHERE email = ?`, { bind: [email] });
-    if (!result.length || !result[0].values.length) {
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (!result.rows.length) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    const cols = result[0].columns;
-    const vals = result[0].values[0];
-    const user = {};
-    cols.forEach((c, i) => user[c] = vals[i]);
-
+    const user = result.rows[0];
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid email or password' });
@@ -434,19 +427,23 @@ app.post('/api/login', async (req, res) => {
 });
 
 // GET /api/user
-app.get('/api/user', authMiddleware, (req, res) => {
-  const user = getUserData(req.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json(user);
+app.get('/api/user', authMiddleware, async (req, res) => {
+  try {
+    const user = await calculateAndGetUser(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (err) {
+    console.error('User fetch error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// GET /api/deposit/address - Get deposit instructions with reference code
-app.get('/api/deposit/address', authMiddleware, (req, res) => {
+// GET /api/deposit/address
+app.get('/api/deposit/address', authMiddleware, async (req, res) => {
   try {
-    const user = getUserData(req.userId);
+    const user = await calculateAndGetUser(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Generate a fresh reference for display
     const referenceCode = generateReferenceCode(req.userId);
 
     res.json({
@@ -464,8 +461,8 @@ app.get('/api/deposit/address', authMiddleware, (req, res) => {
   }
 });
 
-// POST /api/deposit - Create a deposit request
-app.post('/api/deposit', authMiddleware, (req, res) => {
+// POST /api/deposit
+app.post('/api/deposit', authMiddleware, async (req, res) => {
   try {
     const { amount } = req.body;
 
@@ -473,16 +470,15 @@ app.post('/api/deposit', authMiddleware, (req, res) => {
       return res.status(400).json({ error: 'Minimum deposit is 1.00 USDT' });
     }
 
-    // Generate a unique reference code for this deposit
     const referenceCode = generateReferenceCode(req.userId);
 
-    db.run(`INSERT INTO deposits (user_id, amount, reference_code, deposit_address, status) VALUES (?, ?, ?, ?, 'pending')`, {
-      bind: [req.userId, amount, referenceCode, MASTER_WALLET_ADDRESS]
-    });
-    saveDB();
+    const result = await pool.query(
+      `INSERT INTO deposits (user_id, amount, reference_code, deposit_address, status)
+       VALUES ($1, $2, $3, $4, 'pending') RETURNING id`,
+      [req.userId, amount, referenceCode, MASTER_WALLET_ADDRESS]
+    );
 
-    const depositId = db.exec(`SELECT last_insert_rowid() as id`);
-    const id = depositId[0].values[0][0];
+    const id = result.rows[0].id;
 
     res.json({
       message: 'Deposit request created! Send USDT and check status below.',
@@ -498,56 +494,51 @@ app.post('/api/deposit', authMiddleware, (req, res) => {
   }
 });
 
-// GET /api/deposit/check - Poll for deposit status updates (called by frontend)
-app.get('/api/deposit/check', authMiddleware, (req, res) => {
+// GET /api/deposit/check
+app.get('/api/deposit/check', authMiddleware, async (req, res) => {
   try {
-    // Get the most recent pending deposit for this user
-    const result = db.exec(
+    const result = await pool.query(
       `SELECT id, amount, reference_code, deposit_address, status, checked_count, created_at
        FROM deposits
-       WHERE user_id = ?
+       WHERE user_id = $1
        ORDER BY created_at DESC
        LIMIT 1`,
-      { bind: [req.userId] }
+      [req.userId]
     );
 
-    if (!result.length || !result[0].values.length) {
+    if (!result.rows.length) {
       return res.json({ hasDeposit: false });
     }
 
-    const cols = result[0].columns;
-    const vals = result[0].values[0];
-    const deposit = {};
-    cols.forEach((c, i) => deposit[c] = vals[i]);
+    const dep = result.rows[0];
 
-    // Get all deposits for this user
-    const allResult = db.exec(
-      `SELECT id, amount, reference_code, status, created_at FROM deposits WHERE user_id = ? ORDER BY created_at DESC LIMIT 10`,
-      { bind: [req.userId] }
+    const allResult = await pool.query(
+      `SELECT id, amount, reference_code, status, created_at
+       FROM deposits
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10`,
+      [req.userId]
     );
-
-    const allDeposits = [];
-    if (allResult.length) {
-      const aCols = allResult[0].columns;
-      allResult[0].values.forEach(row => {
-        const obj = {};
-        aCols.forEach((c, i) => obj[c] = row[i]);
-        allDeposits.push(obj);
-      });
-    }
 
     res.json({
       hasDeposit: true,
       deposit: {
-        id: deposit.id,
-        amount: deposit.amount,
-        referenceCode: deposit.reference_code,
-        depositAddress: deposit.deposit_address,
-        status: deposit.status,
-        checkedCount: deposit.checked_count,
-        createdAt: deposit.created_at
+        id: dep.id,
+        amount: dep.amount,
+        referenceCode: dep.reference_code,
+        depositAddress: dep.deposit_address,
+        status: dep.status,
+        checkedCount: dep.checked_count,
+        createdAt: dep.created_at
       },
-      allDeposits
+      allDeposits: allResult.rows.map(d => ({
+        id: d.id,
+        amount: d.amount,
+        reference_code: d.reference_code,
+        status: d.status,
+        created_at: d.created_at
+      }))
     });
   } catch (err) {
     console.error('Deposit check error:', err);
@@ -556,27 +547,33 @@ app.get('/api/deposit/check', authMiddleware, (req, res) => {
 });
 
 // GET /api/deposits
-app.get('/api/deposits', authMiddleware, (req, res) => {
-  const result = db.exec(
-    `SELECT id, amount, txid, status, reference_code, created_at FROM deposits WHERE user_id = ? ORDER BY created_at DESC LIMIT 50`,
-    { bind: [req.userId] }
-  );
+app.get('/api/deposits', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, amount, txid, status, reference_code, created_at
+       FROM deposits
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [req.userId]
+    );
 
-  const deposits = [];
-  if (result.length) {
-    const cols = result[0].columns;
-    result[0].values.forEach(row => {
-      const obj = {};
-      cols.forEach((c, i) => obj[c] = row[i]);
-      deposits.push(obj);
-    });
+    res.json(result.rows.map(d => ({
+      id: d.id,
+      amount: d.amount,
+      txid: d.txid,
+      status: d.status,
+      reference_code: d.reference_code,
+      created_at: d.created_at
+    })));
+  } catch (err) {
+    console.error('Deposits fetch error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
-
-  res.json(deposits);
 });
 
 // POST /api/withdraw
-app.post('/api/withdraw', authMiddleware, (req, res) => {
+app.post('/api/withdraw', authMiddleware, async (req, res) => {
   try {
     const { amount, walletAddress } = req.body;
     console.log('Withdraw request:', { amount, walletAddress });
@@ -589,11 +586,10 @@ app.post('/api/withdraw', authMiddleware, (req, res) => {
       return res.status(400).json({ error: 'Wallet address is required' });
     }
 
-    // Calculate KLYN needed
     const amountUsdt = parseFloat(amount);
     const amountKlyn = amountUsdt / KLYN_TO_USDT_RATE;
 
-    const user = getUserData(req.userId);
+    const user = await calculateAndGetUser(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     console.log('User balance KLYN:', user.balanceKlyn, 'Needed:', amountKlyn);
@@ -604,14 +600,16 @@ app.post('/api/withdraw', authMiddleware, (req, res) => {
       });
     }
 
-    db.run(`UPDATE users SET balance_klyn = balance_klyn - ? WHERE id = ?`, {
-      bind: [amountKlyn, req.userId]
-    });
+    await pool.query(
+      'UPDATE users SET balance_klyn = balance_klyn - $1 WHERE id = $2',
+      [amountKlyn, req.userId]
+    );
 
-    db.run(`INSERT INTO withdrawals (user_id, amount_klyn, amount_usdt, wallet_address, status) VALUES (?, ?, ?, ?, 'pending')`, {
-      bind: [req.userId, amountKlyn, amountUsdt, walletAddress]
-    });
-    saveDB();
+    await pool.query(
+      `INSERT INTO withdrawals (user_id, amount_klyn, amount_usdt, wallet_address, status)
+       VALUES ($1, $2, $3, $4, 'pending')`,
+      [req.userId, amountKlyn, amountUsdt, walletAddress]
+    );
 
     res.json({ message: `Withdrawal of ${amountUsdt.toFixed(2)} USDT (${amountKlyn.toFixed(4)} KLYN) submitted` });
   } catch (err) {
@@ -621,43 +619,54 @@ app.post('/api/withdraw', authMiddleware, (req, res) => {
 });
 
 // GET /api/withdrawals
-app.get('/api/withdrawals', authMiddleware, (req, res) => {
-  const result = db.exec(
-    `SELECT id, amount_klyn, amount_usdt, wallet_address, status, created_at FROM withdrawals WHERE user_id = ? ORDER BY created_at DESC LIMIT 50`,
-    { bind: [req.userId] }
-  );
+app.get('/api/withdrawals', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, amount_klyn, amount_usdt, wallet_address, status, created_at
+       FROM withdrawals
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [req.userId]
+    );
 
-  const withdrawals = [];
-  if (result.length) {
-    const cols = result[0].columns;
-    result[0].values.forEach(row => {
-      const obj = {};
-      cols.forEach((c, i) => obj[c] = row[i]);
-      withdrawals.push(obj);
-    });
+    res.json(result.rows.map(w => ({
+      id: w.id,
+      amount_klyn: w.amount_klyn,
+      amount_usdt: w.amount_usdt,
+      wallet_address: w.wallet_address,
+      status: w.status,
+      created_at: w.created_at
+    })));
+  } catch (err) {
+    console.error('Withdrawals fetch error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
-
-  res.json(withdrawals);
 });
 
 // GET /api/mining/status
-app.get('/api/mining/status', authMiddleware, (req, res) => {
-  const user = getUserData(req.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+app.get('/api/mining/status', authMiddleware, async (req, res) => {
+  try {
+    const user = await calculateAndGetUser(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-  res.json({
-    balanceKlyn: user.balanceKlyn,
-    balanceUsdt: user.balanceUsdt,
-    miningSpeed: user.miningSpeed,
-    minedUnclaimed: user.minedUnclaimed,
-    totalDeposited: user.totalDeposited
-  });
+    res.json({
+      balanceKlyn: user.balanceKlyn,
+      balanceUsdt: user.balanceUsdt,
+      miningSpeed: user.miningSpeed,
+      minedUnclaimed: user.minedUnclaimed,
+      totalDeposited: user.totalDeposited
+    });
+  } catch (err) {
+    console.error('Mining status error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // POST /api/mining/claim
-app.post('/api/mining/claim', authMiddleware, (req, res) => {
+app.post('/api/mining/claim', authMiddleware, async (req, res) => {
   try {
-    const user = getUserData(req.userId);
+    const user = await calculateAndGetUser(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     if (user.minedUnclaimed <= 0) {
@@ -665,10 +674,10 @@ app.post('/api/mining/claim', authMiddleware, (req, res) => {
     }
 
     const amount = user.minedUnclaimed;
-    db.run(`UPDATE users SET balance_klyn = balance_klyn + ?, mined_unclaimed = 0 WHERE id = ?`, {
-      bind: [amount, req.userId]
-    });
-    saveDB();
+    await pool.query(
+      'UPDATE users SET balance_klyn = balance_klyn + $1, mined_unclaimed = 0 WHERE id = $2',
+      [amount, req.userId]
+    );
 
     res.json({ message: `Claimed ${amount.toFixed(8)} KLYN`, amount });
   } catch (err) {
@@ -677,43 +686,37 @@ app.post('/api/mining/claim', authMiddleware, (req, res) => {
   }
 });
 
-// POST /api/deposit/verify (admin/simulation endpoint - kept for backward compat)
-app.post('/api/deposit/verify', authMiddleware, (req, res) => {
+// POST /api/deposit/verify (admin/simulation endpoint)
+app.post('/api/deposit/verify', authMiddleware, async (req, res) => {
   try {
     const { depositId } = req.body;
     if (!depositId) return res.status(400).json({ error: 'Deposit ID required' });
 
-    // Get the deposit
-    const depResult = db.exec(`SELECT * FROM deposits WHERE id = ?`, { bind: [depositId] });
-    if (!depResult.length || !depResult[0].values.length) {
+    const depRes = await pool.query('SELECT * FROM deposits WHERE id = $1', [depositId]);
+    if (!depRes.rows.length) {
       return res.status(404).json({ error: 'Deposit not found' });
     }
 
-    const depCols = depResult[0].columns;
-    const depVals = depResult[0].values[0];
-    const deposit = {};
-    depCols.forEach((c, i) => deposit[c] = depVals[i]);
-
+    const deposit = depRes.rows[0];
     if (deposit.status !== 'pending') {
       return res.status(400).json({ error: 'Deposit already processed' });
     }
 
     const newSpeed = deposit.amount * SPEED_PER_USDT;
 
-    // Update deposit status
-    db.run(`UPDATE deposits SET status = 'confirmed' WHERE id = ?`, { bind: [depositId] });
+    await pool.query(
+      "UPDATE deposits SET status = 'confirmed' WHERE id = $1",
+      [depositId]
+    );
 
-    // Update user
-    db.run(`
-      UPDATE users SET
-        balance_usdt = balance_usdt + ?,
-        total_deposited = total_deposited + ?,
-        mining_speed = mining_speed + ?
-      WHERE id = ?
-    `, {
-      bind: [deposit.amount, deposit.amount, newSpeed, deposit.user_id]
-    });
-    saveDB();
+    await pool.query(
+      `UPDATE users SET
+        balance_usdt = balance_usdt + $1,
+        total_deposited = total_deposited + $1,
+        mining_speed = mining_speed + $2
+       WHERE id = $3`,
+      [deposit.amount, newSpeed, deposit.user_id]
+    );
 
     res.json({
       message: `Deposit of ${deposit.amount} USDT confirmed. Mining speed boosted!`,
@@ -725,7 +728,7 @@ app.post('/api/deposit/verify', authMiddleware, (req, res) => {
   }
 });
 
-// GET /api/config - Expose public config to frontend
+// GET /api/config
 app.get('/api/config', (req, res) => {
   res.json({
     minDeposit: 1.00,
@@ -740,15 +743,23 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// GET /api/health - Health check
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    uptime: process.uptime(),
-    bscscanConfigured: !!(BSCSCAN_API_KEY && MASTER_WALLET_ADDRESS !== '0x'.padEnd(42, '0')),
-    pendingDeposits: db.exec(`SELECT COUNT(*) as cnt FROM deposits WHERE status = 'pending'`)[0].values[0][0] || 0,
-    totalUsers: db.exec(`SELECT COUNT(*) as cnt FROM users`)[0].values[0][0] || 0
-  });
+// GET /api/health
+app.get('/api/health', async (req, res) => {
+  try {
+    const userCountRes = await pool.query("SELECT COUNT(*)::int AS cnt FROM users");
+    const depCountRes = await pool.query("SELECT COUNT(*)::int AS cnt FROM deposits WHERE status = 'pending'");
+
+    res.json({
+      status: 'ok',
+      uptime: process.uptime(),
+      bscscanConfigured: !!(BSCSCAN_API_KEY && MASTER_WALLET_ADDRESS !== '0x'.padEnd(42, '0')),
+      pendingDeposits: depCountRes.rows[0].cnt,
+      totalUsers: userCountRes.rows[0].cnt
+    });
+  } catch (err) {
+    console.error('Health check error:', err);
+    res.json({ status: 'ok', uptime: process.uptime() });
+  }
 });
 
 // --- Frontend catch-all ---
@@ -756,25 +767,18 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// --- Start ---
+// ────────────────────────────────────────────────────────────────────────────
+// START SERVER
+// ────────────────────────────────────────────────────────────────────────────
+
 async function start() {
   await initDB();
 
-  // Create default test user if not exists
-  const existing = db.exec(`SELECT id FROM users WHERE email = 'test@klyncoin.com'`);
-  if (!existing.length || !existing[0].values.length) {
-    const pw = await bcrypt.hash('password123', SALT_ROUNDS);
-    db.run(`INSERT OR IGNORE INTO users (email, password, mining_speed) VALUES (?, ?, ?)`, {
-      bind: ['test@klyncoin.com', pw, BASE_SPEED]
-    });
-    saveDB();
-    console.log('Test user created: test@klyncoin.com / password123');
-  }
-
-  // Start background deposit checker
+  // Log startup banner
   const bscMode = !!(BSCSCAN_API_KEY && MASTER_WALLET_ADDRESS !== '0x'.padEnd(42, '0'));
   console.log(`\n╔══════════════════════════════════════════╗`);
-  console.log(`║     🪙 KLYNCoin Server v2.0            ║`);
+  console.log(`║     🪙 KLYNCoin Server v3.0            ║`);
+  console.log(`║     Database: PostgreSQL (Supabase)     ║`);
   console.log(`╠══════════════════════════════════════════╣`);
   console.log(`║  Deposit mode: ${bscMode ? 'BSCScan Auto ✅' : 'Manual / Reference 📝'}      ║`);
   if (bscMode) {
@@ -785,7 +789,6 @@ async function start() {
 
   // Run deposit checker every CHECK_INTERVAL_MS
   setInterval(processPendingDeposits, CHECK_INTERVAL_MS);
-  // Also run once at startup after a short delay
   setTimeout(processPendingDeposits, 5000);
 
   app.listen(PORT, '0.0.0.0', () => {
